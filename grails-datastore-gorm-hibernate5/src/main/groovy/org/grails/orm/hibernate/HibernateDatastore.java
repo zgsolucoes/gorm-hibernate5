@@ -88,6 +88,11 @@ public class HibernateDatastore extends AbstractHibernateDatastore implements Me
     protected ConfigurableApplicationEventPublisher eventPublisher;
     protected final HibernateGormEnhancer gormEnhancer;
     protected final Map<String, HibernateDatastore> datastoresByConnectionSource = new LinkedHashMap<>();
+    /**
+     * ZeroGlosa: value of {@code grails.gorm.autoFlush} when it is set explicitly, or null when absent.
+     * @see #isAutoFlush()
+     */
+    protected final Boolean explicitAutoFlush;
 
     /**
      * Create a new HibernateDatastore for the given connection sources and mapping context
@@ -98,6 +103,10 @@ public class HibernateDatastore extends AbstractHibernateDatastore implements Me
      */
     public HibernateDatastore(final ConnectionSources<SessionFactory, HibernateConnectionSourceSettings> connectionSources, final HibernateMappingContext mappingContext, final ConfigurableApplicationEventPublisher eventPublisher) {
         super(connectionSources, mappingContext);
+        PropertyResolver baseConfiguration = connectionSources.getBaseConfiguration();
+        this.explicitAutoFlush = baseConfiguration != null && baseConfiguration.containsProperty(Settings.SETTING_AUTO_FLUSH)
+                ? baseConfiguration.getProperty(Settings.SETTING_AUTO_FLUSH, Boolean.class, false)
+                : null;
 
         HibernateConnectionSource defaultConnectionSource = (HibernateConnectionSource) connectionSources.getDefaultConnectionSource();
         this.transactionManager = new GrailsHibernateTransactionManager(
@@ -312,6 +321,23 @@ public class HibernateDatastore extends AbstractHibernateDatastore implements Me
      */
     public HibernateDatastore(Package packageToScan) {
         this(new ClasspathEntityScanner().scan(packageToScan));
+    }
+
+    /**
+     * Whether save()/delete() without an explicit {@code flush} argument flush the session.
+     *
+     * <p>GORM 6.1.7 derives it from the session flush mode ({@code hibernate.flush.mode == AUTO}), so a datastore whose
+     * sessions flush before queries (FlushMode AUTO, as in Grails 2) also flushes on every save()/delete(). In Grails 2 the
+     * two were independent: {@code grails.gorm.autoFlush} (default false) controlled save()/delete() and the Hibernate
+     * session kept FlushMode AUTO. When {@code grails.gorm.autoFlush} is set explicitly it wins here, restoring that
+     * independence (ZeroGlosa); when absent, the GORM 6.1.7 behaviour is kept.</p>
+     */
+    @Override
+    public boolean isAutoFlush() {
+        if (explicitAutoFlush != null) {
+            return explicitAutoFlush;
+        }
+        return super.isAutoFlush();
     }
 
     @Override
