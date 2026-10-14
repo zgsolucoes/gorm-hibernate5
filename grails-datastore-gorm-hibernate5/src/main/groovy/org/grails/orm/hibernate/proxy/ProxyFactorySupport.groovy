@@ -131,7 +131,17 @@ class ProxyFactorySupport {
                         }
                         returnValue = \$2.invoke(target, \$4);
                     }
-                    return returnValue == target ? \$1 : returnValue;
+                    if (returnValue == target) {
+                        // Fork ZeroGlosa (e2e-0097): `proxyDaRaizAbstrata as Subclasse` chama o asType do domínio, que
+                        // devolve a instância carregada; trocá-la pelo proxy (que não é instância da subclasse pedida) faz
+                        // o checkcast do chamador estourar ClassCastException. Nesse caso devolve a implementação.
+                        if (\$4.length == 1 && \$4[0] instanceof Class && "asType".equals(\$2.getName())
+                                && !((Class) \$4[0]).isInstance(\$1)) {
+                            return target;
+                        }
+                        return \$1;
+                    }
+                    return returnValue;
                 }
                 catch (${InvocationTargetException.name} ite) {
                     throw ite.getTargetException();
