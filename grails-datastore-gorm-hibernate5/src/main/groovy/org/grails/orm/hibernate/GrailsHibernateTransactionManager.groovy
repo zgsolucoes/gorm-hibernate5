@@ -23,6 +23,7 @@ import org.hibernate.Session
 import org.hibernate.SessionFactory
 import org.hibernate.engine.jdbc.spi.JdbcCoordinator
 import org.hibernate.engine.spi.SessionImplementor
+import org.springframework.jdbc.datasource.ConnectionHolder
 import org.springframework.orm.hibernate5.HibernateTransactionManager
 import org.springframework.orm.hibernate5.SessionHolder
 import org.springframework.transaction.TransactionDefinition
@@ -61,8 +62,83 @@ class GrailsHibernateTransactionManager extends HibernateTransactionManager {
         this.isJdbcBatchVersionedData = sessionFactory.getSessionFactoryOptions().isJdbcBatchVersionedData()
     }
 
+    /**
+     * Fork ZeroGlosa (ZG-2497, backlog e2e-0081): sessão/conexão deste datastore presas a OUTRA transação, desligadas
+     * durante uma transação nova e religadas no fim (ver {@link #desligueRecursosDeOutraTransacao}).
+     */
+    private final Map<Object, RecursosDeOutraTransacao> recursosDeOutraTransacao =
+            Collections.synchronizedMap(new IdentityHashMap<Object, RecursosDeOutraTransacao>())
+
     @Override
     protected void doBegin(Object transaction, TransactionDefinition definition) {
+        RecursosDeOutraTransacao deOutraTransacao = desligueRecursosDeOutraTransacao()
+        try {
+            doBeginDoGrails(transaction, definition)
+        } catch (Throwable e) {
+            deOutraTransacao?.religue(sessionFactory, dataSource)
+            throw e
+        }
+        if (deOutraTransacao != null) {
+            recursosDeOutraTransacao.put(transaction, deOutraTransacao)
+        }
+    }
+
+    @Override
+    protected void doCleanupAfterCompletion(Object transaction) {
+        try {
+            super.doCleanupAfterCompletion(transaction)
+        } finally {
+            recursosDeOutraTransacao.remove(transaction)?.religue(sessionFactory, dataSource)
+        }
+    }
+
+    /**
+     * Fork ZeroGlosa (ZG-2497, backlog e2e-0081). O doBegin só roda para transação nova deste datastore (não há uma
+     * transação dele em curso). Se ainda assim há, ligados à thread, uma sessão deste datastore marcada
+     * synchronizedWithTransaction (sem transação do Hibernate) e/ou um ConnectionHolder do datasource dele
+     * synchronizedWithTransaction, eles pertencem a OUTRA transação (ex.: a sessão do portal alistada pelo
+     * GrailsSessionContext na transação do datastore padrão, e a conexão dela ligada pelo DataSourceUtils), cujas
+     * sincronizações o suspend do Spring não alcançou — o {@link GrailsHibernateTemplate#executeWithNewSession} as esconde
+     * (clear + init) em vez de suspendê-las. Sem isto o doBegin abre outra sessão e falha ao ligar a conexão nova:
+     * "Already value [ConnectionHolder] for key [...DataSource] bound to thread". Aqui eles são desligados como o suspend
+     * dessas sincronizações faria, e religados em {@link #doCleanupAfterCompletion} (ou se o doBegin falhar).
+     * Nada muda quando não há recurso alheio ligado.
+     */
+    private RecursosDeOutraTransacao desligueRecursosDeOutraTransacao() {
+        Object sessao = TransactionSynchronizationManager.getResource(sessionFactory)
+        Object conexao = dataSource != null ? TransactionSynchronizationManager.getResource(dataSource) : null
+        boolean sessaoAlheia = sessao instanceof SessionHolder &&
+                ((SessionHolder) sessao).isSynchronizedWithTransaction() && ((SessionHolder) sessao).getTransaction() == null
+        boolean conexaoAlheia = conexao instanceof ConnectionHolder && ((ConnectionHolder) conexao).isSynchronizedWithTransaction()
+        if (!sessaoAlheia && !conexaoAlheia) {
+            return null
+        }
+        RecursosDeOutraTransacao recursos = new RecursosDeOutraTransacao()
+        if (sessaoAlheia) {
+            recursos.sessao = (SessionHolder) TransactionSynchronizationManager.unbindResource(sessionFactory)
+        }
+        if (conexaoAlheia) {
+            recursos.conexao = (ConnectionHolder) TransactionSynchronizationManager.unbindResource(dataSource)
+        }
+        return recursos
+    }
+
+    @CompileStatic
+    private static class RecursosDeOutraTransacao {
+        SessionHolder sessao
+        ConnectionHolder conexao
+
+        void religue(SessionFactory sessionFactory, DataSource dataSource) {
+            if (sessao != null) {
+                TransactionSynchronizationManager.bindResource(sessionFactory, sessao)
+            }
+            if (conexao != null) {
+                TransactionSynchronizationManager.bindResource(dataSource, conexao)
+            }
+        }
+    }
+
+    private void doBeginDoGrails(Object transaction, TransactionDefinition definition) {
         super.doBegin transaction, definition
 
         if (definition.isReadOnly()) {

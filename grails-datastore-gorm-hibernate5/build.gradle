@@ -1,6 +1,7 @@
 // Fork ZeroGlosa: versão própria do artefato publicado (o gormVersion continua 6.1.7.RELEASE porque resolve o
 // grails-datastore-gorm-hibernate-core e o tck). ZG3 = ZG2 (73e94e0) + grails.gorm.autoFlush explícito (integracao-0017).
-version '6.1.7.ZG3'
+// ZG4 = ZG3 + GrailsHibernateTransactionManager desliga sessão/conexão presas a outra transação (e2e-0081).
+version '6.1.7.ZG4'
 
 dependencies {
     compile("org.grails:grails-datastore-gorm-hibernate-core:$gormVersion") {
