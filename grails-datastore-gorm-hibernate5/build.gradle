@@ -2,7 +2,8 @@
 // grails-datastore-gorm-hibernate-core e o tck). ZG3 = ZG2 (73e94e0) + grails.gorm.autoFlush explícito (integracao-0017).
 // ZG4 = ZG3 + GrailsHibernateTransactionManager desliga sessão/conexão presas a outra transação (e2e-0081).
 // ZG5 = ZG4 + proxy do Hibernate devolve a implementação no asType para subclasse que o proxy não é (e2e-0097).
-version '6.1.7.ZG5'
+// ZG6 = ZG5 + proxy lazy serializa (serializableProxy adicionado à classe gerada; roteiro NUC-021).
+version '6.1.7.ZG6'
 
 dependencies {
     compile("org.grails:grails-datastore-gorm-hibernate-core:$gormVersion") {

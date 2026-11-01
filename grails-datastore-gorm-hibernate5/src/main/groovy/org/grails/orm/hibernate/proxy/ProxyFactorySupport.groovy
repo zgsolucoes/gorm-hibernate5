@@ -92,6 +92,9 @@ class ProxyFactorySupport {
                 setIdentifierMethod,
                 componentIdType);       
 }""")
+            // ZeroGlosa: o método era montado mas nunca adicionado; sem ele o writeReplace do proxy dava AbstractMethodError e
+            // nenhum proxy lazy serializava (sessão HTTP no Redis, roteiro NUC-021)
+            initializerClass.addMethod(serializableProxyMethod)
 
             // Add method: Object invoke(Object, Method, Method, Object[])
             CtClass methodType = getClassFromPool(pool, Method.name)
